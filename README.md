@@ -6,10 +6,12 @@ A CrewAI-powered agent system that answers questions based on tax and income tax
 
 - **Document Processing**: Automatically loads and indexes all `.txt` and `.md` files from the specified documents folder.
 - **Local Embeddings**: Uses HuggingFace (`all-MiniLM-L6-v2`) for local vector generation, eliminating quota issues for embeddings.
+- **Query Triage & Rewriting**: Automatically classifies queries to ensure they are tax-related and rewrites them for optimized search retrieval.
 - **Vector Search**: Uses ChromaDB for efficient semantic search across documents.
 - **Multi-Agent System**: 
-  - **Researcher Agent**: Searches and retrieves relevant information from documents.
-  - **Advisor Agent**: Synthesizes information into clear, accurate answers.
+  - **Router Agent**: Analyzes intent, filters out non-tax queries, and rewrites valid queries for better search.
+  - **Researcher Agent**: Searches and retrieves relevant information from documents using rewritten queries.
+  - **Advisor Agent**: Synthesizes researched information into clear, accurate answers.
 - **Groq Integration**: Powered by Groq (Llama 3.1) for lightning-fast, high-quality responses.
 - **Interactive CLI**: Easy-to-use command-line interface for asking questions.
 
@@ -81,12 +83,14 @@ Type `exit`, `quit`, or `q` to end the session.
 
 2. **Query Processing**:
    - User asks a question.
-   - **Researcher Agent**: Uses the `DocumentSearchTool` to scan the local ChromaDB for relevant excerpts.
-   - **Advisor Agent**: Takes the researched excerpts and synthesizes them into a final answer using the Groq LLM.
+   - **Router Agent**: Analyzes if the query is related to tax law. If not, it provides a polite rejection. If yes, it rewrites the query into optimized keywords for a vector search.
+   - **Researcher Agent**: Uses the **rewritten query** to scan the local ChromaDB for relevant excerpts (e.g., specific Sections or Rules).
+   - **Advisor Agent**: Takes the raw excerpts and the original question to synthesize a final, human-readable answer.
 
 3. **Multi-Agent Collaboration**:
-   - The Researcher focuses on finding raw information.
-   - The Advisor focuses on accuracy and clarity in interpretation.
+   - The **Router** acts as a gatekeeper and optimizer.
+   - The **Researcher** acts as a document excavator.
+   - The **Advisor** acts as the final legal interpreter.
 
 ## Documents Indexed
 

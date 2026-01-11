@@ -36,19 +36,33 @@ class TaxAgentCrew:
         Create agents for the crew.
         """
 
-        # 🔍 Researcher: TOOL-ONLY agent (no LLM, saves tokens)
+        # � Router: Checks relevance and rewrites query
+        router = Agent(
+            role="Query Router and Rewriter",
+            goal="Classify if a query is tax-related and rewrite it for optimal document retrieval.",
+            backstory=(
+                "You are an expert at analyzing user intent. Your primary job is to determine if a "
+                "question is about taxation, income tax, or tax laws. If it is, you rewrite it "
+                "into a focused search query for a vector database. If it is not, you clearly "
+                "mark it as irrelevant."
+            ),
+            llm=self.llm,
+            verbose=True,
+            allow_delegation=False
+        )
+
+        # 🔍 Researcher: TOOL-ONLY agent
         researcher = Agent(
             role="Tax Document Researcher",
             goal="Search and retrieve relevant information from tax documents",
             backstory=(
-                "You are an expert researcher specializing in tax and income tax "
-                "documentation. You retrieve exact and relevant sections from official "
-                "tax documents without adding interpretations."
+                "You are an expert researcher specializing in tax documentation. You retrieve "
+                "exact and relevant sections from official tax documents without adding interpretations."
             ),
             tools=[self.search_tool],
-            llm="groq/llama-3.1-8b-instant",  # 🚨 IMPORTANT: tool-only
+            llm=self.llm,
             verbose=True,
-            # allow_delegation=False
+            allow_delegation=False
         )
 
         # 🧠 Advisor: LLM-powered agent
@@ -56,28 +70,41 @@ class TaxAgentCrew:
             role="Tax Advisor",
             goal="Provide clear, accurate answers based on researched tax documents",
             backstory=(
-                "You are a knowledgeable tax advisor with expertise in Bangladesh's "
-                "income tax system. You explain tax matters clearly using official "
-                "documents and cite sources when possible."
+                "You are a knowledgeable tax advisor with expertise in the income tax system. "
+                "You explain tax matters clearly using official documents and cite sources when possible."
             ),
-            llm="groq/llama-3.1-8b-instant",
+            llm=self.llm,
             verbose=True,
-            # allow_delegation=False
+            allow_delegation=False
         )
 
-        return researcher, advisor
+        return router, researcher, advisor
 
-    def create_tasks(self, query: str, researcher: Agent, advisor: Agent):
+    def create_tasks(self, query: str, router: Agent, researcher: Agent, advisor: Agent):
         """
         Create tasks for answering the query.
         """
 
+        triage_task = Task(
+            description=(
+                f"Analyze this query: '{query}'\n"
+                "1. Determine if it is related to tax, income tax, or taxation laws.\n"
+                "2. If it is NOT tax-related, the output MUST be exactly: 'IRRELEVANT: [A brief, polite explanation why]'.\n"
+                "3. If it IS tax-related, rewrite the query to be optimized for a vector database search "
+                "(focused on key terms like 'Section', 'Section 16', 'Tax Rate', etc.). "
+                "The output MUST be exactly the rewritten query and nothing else."
+            ),
+            agent=router,
+            expected_output="Either 'IRRELEVANT: [explanation]' or a rewritten search query."
+        )
+
         research_task = Task(
             description=(
-                f"Search the tax document database for information relevant to: '{query}'. "
+                "Search the tax document database for information relevant to the provided query. "
                 "Retrieve the most relevant sections with source references."
             ),
             agent=researcher,
+            context=[triage_task],
             expected_output=(
                 "Relevant excerpts from tax documents with source references."
             )
@@ -85,7 +112,7 @@ class TaxAgentCrew:
 
         advisory_task = Task(
             description=(
-                f"Using the researched information, answer the question: '{query}'. "
+                f"Using the researched information, answer the original user question: '{query}'. "
                 "Explain clearly and accurately. If information is missing, state it."
             ),
             agent=advisor,
@@ -95,29 +122,43 @@ class TaxAgentCrew:
             )
         )
 
-        return [research_task, advisory_task]
+        return triage_task, research_task, advisory_task
 
     def answer_query(self, query: str):
         """
-        Run the crew to answer the query.
+        Run the crew to answer the query with triage and rewriting.
         """
 
         print("\n" + "=" * 80)
         print(f"Processing query: {query}")
         print("=" * 80 + "\n")
 
-        researcher, advisor = self.create_agents()
-        tasks = self.create_tasks(query, researcher, advisor)
+        router, researcher, advisor = self.create_agents()
+        triage_task, research_task, advisory_task = self.create_tasks(query, router, researcher, advisor)
 
-        crew = Crew(
+        # Step 1: Run triage task to check relevance and rewrite
+        triage_crew = Crew(
+            agents=[router],
+            tasks=[triage_task],
+            verbose=True
+        )
+        
+        triage_result = str(triage_crew.kickoff())
+        
+        if triage_result.startswith("IRRELEVANT:"):
+            return triage_result.replace("IRRELEVANT:", "").strip()
+
+        # Step 2: If relevant, run research and advisory tasks with the rewritten query
+        # The research_task will use triage_result as it's in context
+        rag_crew = Crew(
             agents=[researcher, advisor],
-            tasks=tasks,
+            tasks=[research_task, advisory_task],
             process=Process.sequential,
             verbose=True
         )
 
         try:
-            return crew.kickoff()
+            return rag_crew.kickoff()
 
         except RateLimitError:
             return (
