@@ -1,0 +1,165 @@
+import os
+from crewai import Agent, Task, Crew, Process, LLM
+from tools import DocumentSearchTool
+from dotenv import load_dotenv
+from litellm import RateLimitError
+
+load_dotenv()
+
+
+class TaxAgentCrew:
+    """
+    Tax Agent Crew for answering questions based on tax documents.
+    """
+
+    def __init__(self):
+        # --- LLM initialization (Groq primary, Gemini fallback) ---
+        self.llm = self._init_llm()
+
+        # --- Tools ---
+        self.search_tool = DocumentSearchTool()
+
+    def _init_llm(self):
+        """
+        Initialize LLM with Groq (LiteLLM-compatible).
+        """
+        if not os.getenv("GROQ_API_KEY"):
+            raise RuntimeError("❌ GROQ_API_KEY not set")
+
+        return LLM(
+            model="groq/llama-3.1-8b-instant",
+            temperature=0.3,
+        )
+
+    def create_agents(self):
+        """
+        Create agents for the crew.
+        """
+
+        # 🔍 Researcher: TOOL-ONLY agent (no LLM, saves tokens)
+        researcher = Agent(
+            role="Tax Document Researcher",
+            goal="Search and retrieve relevant information from tax documents",
+            backstory=(
+                "You are an expert researcher specializing in tax and income tax "
+                "documentation. You retrieve exact and relevant sections from official "
+                "tax documents without adding interpretations."
+            ),
+            tools=[self.search_tool],
+            llm="groq/llama-3.1-8b-instant",  # 🚨 IMPORTANT: tool-only
+            verbose=True,
+            # allow_delegation=False
+        )
+
+        # 🧠 Advisor: LLM-powered agent
+        advisor = Agent(
+            role="Tax Advisor",
+            goal="Provide clear, accurate answers based on researched tax documents",
+            backstory=(
+                "You are a knowledgeable tax advisor with expertise in Bangladesh's "
+                "income tax system. You explain tax matters clearly using official "
+                "documents and cite sources when possible."
+            ),
+            llm="groq/llama-3.1-8b-instant",
+            verbose=True,
+            # allow_delegation=False
+        )
+
+        return researcher, advisor
+
+    def create_tasks(self, query: str, researcher: Agent, advisor: Agent):
+        """
+        Create tasks for answering the query.
+        """
+
+        research_task = Task(
+            description=(
+                f"Search the tax document database for information relevant to: '{query}'. "
+                "Retrieve the most relevant sections with source references."
+            ),
+            agent=researcher,
+            expected_output=(
+                "Relevant excerpts from tax documents with source references."
+            )
+        )
+
+        advisory_task = Task(
+            description=(
+                f"Using the researched information, answer the question: '{query}'. "
+                "Explain clearly and accurately. If information is missing, state it."
+            ),
+            agent=advisor,
+            context=[research_task],
+            expected_output=(
+                "A clear, well-structured answer based strictly on tax documents."
+            )
+        )
+
+        return [research_task, advisory_task]
+
+    def answer_query(self, query: str):
+        """
+        Run the crew to answer the query.
+        """
+
+        print("\n" + "=" * 80)
+        print(f"Processing query: {query}")
+        print("=" * 80 + "\n")
+
+        researcher, advisor = self.create_agents()
+        tasks = self.create_tasks(query, researcher, advisor)
+
+        crew = Crew(
+            agents=[researcher, advisor],
+            tasks=tasks,
+            process=Process.sequential,
+            verbose=True
+        )
+
+        try:
+            return crew.kickoff()
+
+        except RateLimitError:
+            return (
+                "⚠️ LLM quota exceeded. Please try again later or switch LLM provider."
+            )
+
+        except Exception as e:
+            return f"❌ Error while processing query: {str(e)}"
+
+
+def main():
+    """
+    Main CLI loop.
+    """
+
+    print("=" * 80)
+    print("TAX AGENT - Document-based Q&A System")
+    print("=" * 80)
+    print("\nThis agent answers questions based on tax documents.")
+    print("Type 'exit' or 'quit' to end the session.\n")
+
+    tax_crew = TaxAgentCrew()
+
+    while True:
+        query = input("\nYour question: ").strip()
+
+        if query.lower() in {"exit", "quit", "q"}:
+            print("\nThank you for using Tax Agent. Goodbye!")
+            break
+
+        if not query:
+            print("⚠️ Please enter a valid question.")
+            continue
+
+        answer = tax_crew.answer_query(query)
+
+        print("\n" + "=" * 80)
+        print("ANSWER:")
+        print("=" * 80)
+        print(answer)
+        print("=" * 80)
+
+
+if __name__ == "__main__":
+    main()

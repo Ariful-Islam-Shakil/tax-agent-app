@@ -1,0 +1,10 @@
+crewai
+crewai-tools
+langchain-google-genai
+langchain-community
+chromadb
+python-dotenv
+tiktoken<0.8.0
+sentence-transformers
+langchain-huggingface
+langchain-chroma
