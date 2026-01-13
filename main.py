@@ -27,7 +27,7 @@ class TaxAgentCrew:
             raise RuntimeError("❌ GROQ_API_KEY not set")
 
         return LLM(
-            model="groq/llama-3.1-8b-instant",
+            model="groq/meta-llama/llama-4-scout-17b-16e-instruct",
             temperature=0.3,
         )
 
@@ -118,7 +118,7 @@ class TaxAgentCrew:
             agent=advisor,
             context=[research_task],
             expected_output=(
-                "A clear, well-structured answer based strictly on tax documents."
+                "A clear, well-structured answer based strictly on tax documents in markdown format."
             )
         )
 

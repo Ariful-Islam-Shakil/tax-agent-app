@@ -7,7 +7,7 @@ A CrewAI-powered agent system that answers questions based on tax and income tax
 - **Document Processing**: Automatically loads and indexes all `.txt` and `.md` files from the specified documents folder.
 - **Local Embeddings**: Uses HuggingFace (`all-MiniLM-L6-v2`) for local vector generation, eliminating quota issues for embeddings.
 - **Query Triage & Rewriting**: Automatically classifies queries to ensure they are tax-related and rewrites them for optimized search retrieval.
-- **Vector Search**: Uses ChromaDB for efficient semantic search across documents.
+- **Vector Search**: Uses Weaviate Cloud for enterprise-grade vector search and document retrieval.
 - **Multi-Agent System**: 
   - **Router Agent**: Analyzes intent, filters out non-tax queries, and rewrites valid queries for better search.
   - **Researcher Agent**: Searches and retrieves relevant information from documents using rewritten queries.
@@ -35,7 +35,8 @@ Edit the `.env` file and add your keys:
 ```text
 DOCUMENTS_PATH=/path/to/your/tax_documents
 GROQ_API_KEY=your_groq_api_key
-GOOGLE_API_KEY=your_google_api_key
+WEAVIATE_URL=your_weaviate_cluster_url
+WEAVIATE_API_KEY=your_weaviate_api_key
 ```
 
 ### 4. Index Documents
@@ -50,7 +51,7 @@ This will:
 - Load all `.txt` and `.md` files from the documents folder.
 - Split them into chunks.
 - Create embeddings **locally** using the HuggingFace `all-MiniLM-L6-v2` model.
-- Store them in a ChromaDB vector database (`./chroma_db`).
+- Store them in a Weaviate Cloud index (`TaxDocument`).
 
 **Note**: You only need to run this once, unless you add new documents.
 
@@ -79,12 +80,12 @@ Type `exit`, `quit`, or `q` to end the session.
 1. **Document Processing**: 
    - All text files are loaded and split into manageable chunks.
    - Each chunk is converted to embeddings using a **local HuggingFace model**, meaning no API costs or rate limits for indexing.
-   - Embeddings are stored in ChromaDB for fast retrieval.
+   - Embeddings are stored in Weaviate Cloud for fast, scalable retrieval.
 
 2. **Query Processing**:
    - User asks a question.
    - **Router Agent**: Analyzes if the query is related to tax law. If not, it provides a polite rejection. If yes, it rewrites the query into optimized keywords for a vector search.
-   - **Researcher Agent**: Uses the **rewritten query** to scan the local ChromaDB for relevant excerpts (e.g., specific Sections or Rules).
+   - **Researcher Agent**: Uses the **rewritten query** to scan the Weaviate index for relevant excerpts (e.g., specific Sections or Rules).
    - **Advisor Agent**: Takes the raw excerpts and the original question to synthesize a final, human-readable answer.
 
 3. **Multi-Agent Collaboration**:
@@ -103,10 +104,10 @@ The system indexes all `.txt` and `.md` files in the configured documents path, 
 ## Technologies Used
 
 - **CrewAI**: Multi-agent orchestration framework.
-- **LangChain & LangChain-Chroma**: Document processing and vector store integration.
+- **LangChain & langchain-weaviate**: Document processing and vector store integration.
 - **Groq**: High-performance LLM hosting (Llama 3.1).
 - **HuggingFace**: Local embedding models (`all-MiniLM-L6-v2`).
-- **ChromaDB**: Local vector database.
+- **Weaviate**: Managed vector database.
 
 ## Troubleshooting
 
@@ -121,4 +122,4 @@ The system indexes all `.txt` and `.md` files in the configured documents path, 
 
 **Error: "No relevant information found"**
 - Make sure you've run `document_processor.py` to index the documents first.
-- Check that the `chroma_db` folder exists and contains data.
+- Check that your Weaviate cluster is accessible and the index contains data.
