@@ -118,7 +118,7 @@ class TaxAgentCrew:
             agent=advisor,
             context=[research_task],
             expected_output=(
-                "A clear, well-structured answer based strictly on tax documents."
+                "A clear, well-structured answer based strictly on tax documents in markdown format."
             )
         )
 
