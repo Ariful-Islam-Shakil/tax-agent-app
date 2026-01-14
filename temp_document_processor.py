@@ -1,18 +1,17 @@
 import os
+import shutil
 from typing import List
 from langchain_community.document_loaders import TextLoader, DirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_weaviate import WeaviateVectorStore
-import weaviate
-from weaviate.classes.init import Auth
+from langchain_community.vectorstores import Chroma
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
-class DocumentProcessor:
-    """Process and index documents from the specified folder."""
+class TempDocumentProcessor:
+    """Process and index documents from the specified folder using ChromaDB."""
 
     def __init__(self, documents_path: str, index_name: str = "TaxDocument"):
         if not documents_path:
@@ -25,17 +24,8 @@ class DocumentProcessor:
             model_name="sentence-transformers/all-MiniLM-L6-v2"
         )
 
-        weaviate_url = os.getenv("WEAVIATE_URL")
-        weaviate_api_key = os.getenv("WEAVIATE_API_KEY")
-
-        if not weaviate_url or not weaviate_api_key:
-            raise ValueError("WEAVIATE_URL or WEAVIATE_API_KEY is missing")
-
-        auth_config = Auth.api_key(weaviate_api_key)
-        self.client = weaviate.connect_to_weaviate_cloud(
-            cluster_url=weaviate_url,
-            auth_credentials=auth_config,
-        )
+        # ChromaDB persistence directory
+        self.persist_directory = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
 
     def load_documents(self):
         """Load all text and markdown files."""
@@ -87,15 +77,14 @@ class DocumentProcessor:
         return chunks
 
     def create_vector_store(self, chunks: List):
-        """Create and index documents in Weaviate."""
-        print(f"Indexing {len(chunks)} chunks into Weaviate ({self.index_name})...")
+        """Create and index documents in ChromaDB."""
+        print(f"Indexing {len(chunks)} chunks into ChromaDB ({self.index_name})...")
 
-        vectorstore = WeaviateVectorStore.from_documents(
+        vectorstore = Chroma.from_documents(
             documents=chunks,
             embedding=self.embeddings,
-            client=self.client,
-            index_name=self.index_name,
-            text_key="text",
+            collection_name=self.index_name,
+            persist_directory=self.persist_directory,
         )
 
         print("Indexing completed")
@@ -103,21 +92,25 @@ class DocumentProcessor:
 
     def load_vector_store(self):
         """Load existing vector store."""
-        print(f"Loading existing Weaviate index: {self.index_name}")
+        print(f"Loading existing ChromaDB index: {self.index_name}")
 
-        return WeaviateVectorStore(
-            client=self.client,
-            index_name=self.index_name,
-            embedding=self.embeddings,
-            text_key="text",
+        return Chroma(
+            collection_name=self.index_name,
+            embedding_function=self.embeddings,
+            persist_directory=self.persist_directory,
         )
 
     def process_and_index(self):
         """Main pipeline."""
         try:
-            if self.client.collections.exists(self.index_name):
-                print("Index already exists. Using existing index.")
-                return self.load_vector_store()
+            # Check if collection exists by trying to load it
+            try:
+                vectorstore = self.load_vector_store()
+                if vectorstore._collection.count() > 0:
+                    print("Index already exists. Using existing index.")
+                    return vectorstore
+            except Exception:
+                pass
 
             documents = self.load_documents()
             chunks = self.split_documents(documents)
@@ -128,20 +121,29 @@ class DocumentProcessor:
             raise
 
     def delete_vector_store(self):
-        """Delete existing vector store."""
-        print(f"Deleting existing Weaviate index: {self.index_name}")
-
-        self.client.collections.delete(self.index_name)
-
-        print("Index deleted successfully")
+        """Delete the existing vector store collection and persistence directory."""
+        print(f"Deleting vector store index: {self.index_name}...")
+        try:
+            # Initialize we can use the load_vector_store to get the object
+            vectorstore = self.load_vector_store()
+            vectorstore.delete_collection()
+            
+            # Also remove the persistence directory to clean up files
+            if os.path.exists(self.persist_directory):
+                shutil.rmtree(self.persist_directory)
+                print(f"Removed directory: {self.persist_directory}")
+                
+            print(f"Successfully deleted vector store: {self.index_name}")
+        except Exception as e:
+            print(f"Error deleting vector store: {e}")
 
     def close(self):
-        """Close Weaviate client."""
-        self.client.close()
+        """Close ChromaDB client (cleanup if needed)."""
+        pass
 
 
 if __name__ == "__main__":
-    processor = DocumentProcessor(os.getenv("DOCUMENTS_PATH"))
+    processor = TempDocumentProcessor(os.getenv("TEMP_DOCUMENTS_PATH"))
 
     try:
         vectorstore = processor.process_and_index()
@@ -152,10 +154,16 @@ if __name__ == "__main__":
         print(f"\nQuery: {query}")
         for i, doc in enumerate(results, 1):
             print(f"\nChunk {i}:\n{doc.page_content[:200]}...")
+            print("######\n")
+            print(f"Source: {doc.metadata.get('source', 'Unknown')}")
+            print(f"Page: {doc.metadata.get('page', 'Unknown')}")
+            print("######\n")
+
 
         # print("\n#######\nDeleting vector store...")
         # processor.delete_vector_store()
         # print("\n#######\nVector store deleted successfully.")
+
 
     finally:
         processor.close()
